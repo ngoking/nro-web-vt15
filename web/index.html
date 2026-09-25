@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>NRO Web — Vũ trụ 15 prototype</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#eaf0f6;background:#10151c}
+    *{box-sizing:border-box} body{margin:0;padding:24px;background:#10151c}
+    main{max-width:900px;margin:auto} .card{background:#18212b;border:1px solid #2a3948;border-radius:16px;padding:18px;margin-bottom:14px}
+    h1{font-size:24px;margin:0 0 6px} p{color:#aebdca;line-height:1.5;margin:8px 0}.server{font-weight:700;color:#fff}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{display:flex;flex-direction:column;gap:6px}
+    label{font-size:13px;color:#aebdca} input{font:inherit;padding:12px;border-radius:10px;border:1px solid #3b4d5f;background:#0f151c;color:#fff;min-width:0}
+    button{font:inherit;font-weight:700;padding:11px 15px;border:0;border-radius:10px;cursor:pointer;background:#dce7f0;color:#12202b}
+    button.secondary{background:#2a3948;color:#eaf0f6} button:disabled{opacity:.45;cursor:not-allowed}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+    #status{display:inline-block;padding:6px 10px;border-radius:999px;background:#2a3948;font-size:13px}#status[data-state="ok"]{background:#184c32}#status[data-state="busy"]{background:#5a4814}#status[data-state="err"]{background:#5a2020}
+    #log{height:300px;overflow:auto;background:#090d12;border-radius:10px;padding:12px;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+    #log .ok{color:#8ee6ad}#log .err{color:#ff9696}.warning{border-left:3px solid #e6bd63;padding-left:12px}
+    @media(max-width:640px){body{padding:12px}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <section class="card">
+    <h1>NRO Web — VT15 protocol prototype</h1>
+    <p>Đích cố định: <span class="server">Vũ trụ 15 · dragon15.teamobi.com:14445</span></p>
+    <p id="status">Chưa kết nối</p>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <div class="field"><label for="username">Tài khoản</label><input id="username" autocomplete="username" placeholder="email / tài khoản"></div>
+      <div class="field"><label for="password">Mật khẩu</label><input id="password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    </div>
+    <div class="actions">
+      <button id="connectBtn" type="button">1. Kết nối VT15</button>
+      <button id="loginBtn" type="button" disabled>2. Đăng nhập</button>
+      <button id="disconnectBtn" class="secondary" type="button" disabled>Ngắt</button>
+    </div>
+    <p class="warning">Prototype này kiểm tra kết nối + handshake + login protocol. Nó chưa render map/nhân vật nên chưa phải bản chơi hoàn chỉnh.</p>
+  </section>
+
+  <section class="card">
+    <p><strong>Protocol log</strong> — không ghi mật khẩu.</p>
+    <div id="log" aria-live="polite"></div>
+  </section>
+</main>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
