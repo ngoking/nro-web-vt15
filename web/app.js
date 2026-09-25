@@ -9,12 +9,15 @@ const disconnectBtn = $('#disconnectBtn');
 const userEl = $('#username');
 const passEl = $('#password');
 const charsEl = $('#characters');
+const mapInfoEl = $('#mapInfo');
 
 let ws = null;
 let clientReady = false;
 let setTypeSent = false;
 let clientOkSent = false;
 let loginSent = false;
+let sync = null;
+let loginTimer = null;
 
 function log(line, kind = '') {
   const div = document.createElement('div');
@@ -32,6 +35,54 @@ function setStatus(text, state = 'idle') {
 function clearCharacters() {
   charsEl.innerHTML = '';
   charsEl.hidden = true;
+}
+
+function clearMapInfo() {
+  mapInfoEl.replaceChildren();
+  mapInfoEl.hidden = true;
+}
+
+function showMapInfo(info) {
+  mapInfoEl.replaceChildren();
+  const title = document.createElement('h2');
+  title.textContent = 'Đã nhận thông tin map từ server';
+  const detail = document.createElement('p');
+  detail.textContent = `${info.mapName} · map ${info.mapId} · khu ${info.zoneId}`;
+  const note = document.createElement('p');
+  note.textContent = 'Nhân vật đã vào map. Bản web vẫn chưa vẽ và điều khiển game.';
+  mapInfoEl.append(title, detail, note);
+  mapInfoEl.hidden = false;
+}
+
+function updateSync(command, payload) {
+  if (!sync || clientOkSent) return;
+  let part = null;
+  let version = null;
+  if (command === -87 && payload.length) {
+    part = 'data';
+    version = payload[0];
+  } else if (command === -28 && payload.length > 1) {
+    const sub = payload[0];
+    if (sub === 6) part = 'map';
+    if (sub === 7) part = 'skill';
+    if (sub === 8 && payload.length > 2 && payload[2] === 2) part = 'item';
+    version = payload[1];
+  }
+  if (!part || sync.received.has(part)) return;
+  if (version !== sync.versions[part]) {
+    log(`Bỏ qua dữ liệu ${part}: phiên bản ${version}, cần ${sync.versions[part]}.`, 'err');
+    return;
+  }
+  sync.received.add(part);
+  log(`Đã nhận ${part} (${sync.received.size}/4).`, 'ok');
+  setStatus(`Đang đồng bộ dữ liệu ${sync.received.size}/4…`, 'busy');
+  if (sync.received.size === 4 && ws?.readyState === WebSocket.OPEN) {
+    ws.send(protocol.makeClientOk());
+    ws.send(protocol.makeFinishUpdate());
+    clientOkSent = true;
+    log('Đã tải đủ 4 nhóm dữ liệu; gửi clientOk và finishUpdate.', 'ok');
+    setStatus(loginSent ? 'Đã đồng bộ — chờ danh sách nhân vật' : 'Đã đồng bộ — bấm Đăng nhập', 'ok');
+  }
 }
 
 function showCharacters(characters) {
@@ -92,19 +143,19 @@ const protocol = new NroProtocol({
   onPacket: ({ command, payload }) => {
     log(`RX cmd=${command} len=${payload.length} | ${hex(payload)}`);
 
-    // Server version announcement: -28 / subcommand 4.
-    // The original client compares local data versions here and, once ready,
-    // answers with clientOk (-28 / subcommand 13). Our prototype has no RMS
-    // renderer cache yet, so for protocol/login testing we acknowledge readiness.
+    // Request fresh data/map/skill/item before acknowledging client readiness.
     if (command === -28 && payload[0] === 4) {
       try {
         const v = protocol.parseServerVersions(payload);
-        log(`Server versions: data=${v.data}, map=${v.map}, skill=${v.skill}, item=${v.item}.`, 'ok');
-        if (!clientOkSent && ws?.readyState === WebSocket.OPEN) {
-          ws.send(protocol.makeClientOk());
-          clientOkSent = true;
-          log('Đã gửi clientOk (-28/13). Client protocol đã qua bước version gate.', 'ok');
-          setStatus(loginSent ? 'Đã xác nhận dữ liệu — chờ phản hồi đăng nhập' : 'Sẵn sàng đăng nhập VT15', 'ok');
+        log(`Phiên bản dữ liệu: data=${v.data}, map=${v.map}, skill=${v.skill}, item=${v.item}. Đây không phải ID map.`, 'ok');
+        if (!sync && ws?.readyState === WebSocket.OPEN) {
+          sync = { versions: v, received: new Set() };
+          ws.send(protocol.makeUpdateData());
+          ws.send(protocol.makeUpdateMap());
+          ws.send(protocol.makeUpdateSkill());
+          ws.send(protocol.makeUpdateItem());
+          log('Đã yêu cầu tải data/map/skill/item từ server.', 'ok');
+          setStatus('Đang đồng bộ dữ liệu 0/4…', 'busy');
         }
       } catch (err) {
         log(`Không đọc được version packet: ${err.message}`, 'err');
@@ -112,10 +163,25 @@ const protocol = new NroProtocol({
       return;
     }
 
-    // Login success in the reference client: cmd 0 = character list.
+    updateSync(command, payload);
+
+    if (command === -24) {
+      try {
+        const info = protocol.parseMapInfo(payload);
+        showMapInfo(info);
+        setStatus(`Đã vào ${info.mapName} · map ${info.mapId} · khu ${info.zoneId}`, 'ok');
+        log(`MAP INFO: ${info.mapName}, map=${info.mapId}, khu=${info.zoneId}.`, 'ok');
+      } catch (err) {
+        log(`Có MAP_INFO nhưng parse lỗi: ${err.message}`, 'err');
+      }
+    }
+
+    // Login success: cmd 0 contains the character list.
     if (command === 0) {
       try {
         const chars = protocol.parseLoginCharacters(payload);
+        clearTimeout(loginTimer);
+        loginTimer = null;
         setStatus(`Đăng nhập thành công — ${chars.length} nhân vật`, 'ok');
         log(`LOGIN OK: nhận cmd=0 với ${chars.length} nhân vật.`, 'ok');
         showCharacters(chars);
@@ -135,8 +201,12 @@ function disconnect() {
   setTypeSent = false;
   clientOkSent = false;
   loginSent = false;
+  sync = null;
+  clearTimeout(loginTimer);
+  loginTimer = null;
   protocol.reset();
   clearCharacters();
+  clearMapInfo();
   loginBtn.disabled = true;
   disconnectBtn.disabled = true;
   connectBtn.disabled = false;
@@ -189,14 +259,20 @@ connectBtn.addEventListener('click', () => {
 });
 
 loginBtn.addEventListener('click', () => {
-  if (!clientReady || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!clientReady || !ws || ws.readyState !== WebSocket.OPEN || loginSent) return;
   try {
     const frame = protocol.makeLogin(userEl.value, passEl.value, { version: VT15.version, type: 0 });
     ws.send(frame);
     loginSent = true;
+    loginBtn.disabled = true;
     clearCharacters();
     log('Đã gửi packet login. Mật khẩu không được ghi vào log.');
-    setStatus(clientOkSent ? 'Đã gửi đăng nhập — chờ cmd=0…' : 'Đã gửi đăng nhập — đang chờ version/clientOk…', 'busy');
+    setStatus(clientOkSent ? 'Đã gửi đăng nhập — chờ danh sách nhân vật…' : 'Đã gửi đăng nhập — đang đồng bộ dữ liệu…', 'busy');
+    loginTimer = setTimeout(() => {
+      if (!loginSent || !ws || ws.readyState !== WebSocket.OPEN) return;
+      setStatus('Chưa có danh sách nhân vật sau 30 giây — xem log', 'err');
+      log('Hết 30 giây chưa nhận cmd=0; chưa thể xác nhận đăng nhập thành công.', 'err');
+    }, 30000);
   } catch (err) {
     log(err.message, 'err');
   }
@@ -209,3 +285,4 @@ passEl.addEventListener('keydown', (ev) => {
 
 setStatus('Chưa kết nối');
 clearCharacters();
+clearMapInfo();

@@ -229,6 +229,26 @@ export class NroProtocol {
     return this.frame(-28, new Uint8Array([13]));
   }
 
+  makeUpdateData() {
+    return this.frame(-87);
+  }
+
+  makeUpdateMap() {
+    return this.frame(-28, new Uint8Array([6]));
+  }
+
+  makeUpdateSkill() {
+    return this.frame(-28, new Uint8Array([7]));
+  }
+
+  makeUpdateItem() {
+    return this.frame(-28, new Uint8Array([8]));
+  }
+
+  makeFinishUpdate() {
+    return this.frame(-38);
+  }
+
   makeSelectCharacter(name) {
     const w = new ByteWriter();
     w.byte(1).utf(String(name)); // messageNotMap subcommand 1
@@ -264,6 +284,18 @@ export class NroProtocol {
       });
     }
     return characters;
+  }
+
+  parseMapInfo(payload) {
+    const r = new ByteReader(payload);
+    const mapId = r.byte();
+    const planetId = r.sbyte();
+    const tileId = r.sbyte();
+    const backgroundId = r.sbyte();
+    const mapType = r.sbyte();
+    const mapName = r.utf();
+    const zoneId = r.sbyte();
+    return { mapId, planetId, tileId, backgroundId, mapType, mapName, zoneId };
   }
 }
 

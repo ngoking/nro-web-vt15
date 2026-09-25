@@ -20,6 +20,10 @@ Ban nay da duoc chinh de deploy len cloud: bind `0.0.0.0`, dung bien moi truong 
 - Framing packet mã hóa với read/write cursor riêng.
 - `messageNotLogin(-29)` / subcommand `2` (`setClientType`).
 - `messageNotLogin(-29)` / subcommand `0` (`login`).
+- Yêu cầu bốn nhóm cập nhật data/map/skill/item; chỉ gửi `clientOk` và
+  `finishUpdate` sau khi nhận đủ phiên bản tương ứng.
+- Đọc danh sách nhân vật (`cmd=0`) và thông tin map (`cmd=-24`) để xác nhận
+  từng mốc của phiên đăng nhập. ID map khác với số phiên bản dữ liệu map.
 - Web form để tự nhập tài khoản/mật khẩu; không dùng dữ liệu đăng nhập tìm thấy trong file game.
 - Packet log để biết server có chấp nhận phiên web hay không.
 
@@ -37,7 +41,10 @@ Nếu máy chủ không truy cập được từ mạng của bạn, log gateway
 
 ## Trạng thái hiện tại
 
-Đây **chưa phải client chơi hoàn chỉnh**. Sau login còn phải port các phần sau từ client:
+Đây **chưa phải client chơi hoàn chỉnh**. Luồng đồng bộ và nhận map chưa được
+xác nhận bằng một phiên đăng nhập thật; không nên coi `Handshake OK`,
+`clientOk`, hoặc việc nhận phiên bản dữ liệu là đã online. Sau login còn phải
+port các phần sau từ client:
 
 1. parser các packet dữ liệu/version và `clientOk`;
 2. map/tile/background;
