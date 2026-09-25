@@ -1,6 +1,5 @@
-// Minimal NRO protocol implementation based on the client structure found in
-// the supplied build and a public reference client. This is deliberately kept
-// separate from rendering/gameplay logic.
+// NRO protocol helpers for the VT15 web prototype.
+// Rendering/gameplay is intentionally separate from transport/protocol logic.
 
 export const VT15 = Object.freeze({
   name: "Vũ trụ 15",
@@ -38,6 +37,44 @@ export class ByteWriter {
   finish() { return new Uint8Array(this.a); }
 }
 
+export class ByteReader {
+  constructor(data) {
+    this.a = data instanceof Uint8Array ? data : new Uint8Array(data);
+    this.p = 0;
+  }
+  need(n) {
+    if (this.p + n > this.a.length) throw new Error(`Packet truncated at ${this.p}, need ${n}`);
+  }
+  byte() { this.need(1); return this.a[this.p++]; }
+  sbyte() { return s8(this.byte()); }
+  ushort() { this.need(2); return (this.a[this.p++] << 8) | this.a[this.p++]; }
+  short() {
+    const v = this.ushort();
+    return (v & 0x8000) ? v - 0x10000 : v;
+  }
+  int() {
+    this.need(4);
+    const v = (this.a[this.p] << 24) | (this.a[this.p + 1] << 16) | (this.a[this.p + 2] << 8) | this.a[this.p + 3];
+    this.p += 4;
+    return v | 0;
+  }
+  long() {
+    this.need(8);
+    let v = 0n;
+    for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(this.a[this.p++]);
+    if (v & (1n << 63n)) v -= 1n << 64n;
+    return v;
+  }
+  utf() {
+    const n = this.ushort();
+    this.need(n);
+    const s = new TextDecoder().decode(this.a.slice(this.p, this.p + n));
+    this.p += n;
+    return s;
+  }
+  remaining() { return this.a.length - this.p; }
+}
+
 export class NroProtocol {
   constructor({ onPacket, onKey, onLog } = {}) {
     this.onPacket = onPacket || (() => {});
@@ -54,10 +91,8 @@ export class NroProtocol {
     this.keyReady = false;
   }
 
-  // Initial request used by Session_ME right after TCP connect.
   handshakeRequest() {
-    // cmd=-27 (0xE5), zero payload. Zero length has identical bytes in either endian.
-    return new Uint8Array([0xe5, 0x00, 0x00]);
+    return new Uint8Array([0xe5, 0x00, 0x00]); // cmd=-27, payload=0
   }
 
   feed(chunk) {
@@ -70,28 +105,20 @@ export class NroProtocol {
     while (true) {
       const pkt = this.keyReady ? this._tryEncryptedPacket() : this._tryPlainPacket();
       if (!pkt) break;
-      if (!this.keyReady && pkt.command === -27) {
-        this._acceptKey(pkt.payload);
-      } else {
-        this.onPacket(pkt);
-      }
+      if (!this.keyReady && pkt.command === -27) this._acceptKey(pkt.payload);
+      else this.onPacket(pkt);
     }
   }
 
   _tryPlainPacket() {
     if (this.rx.length < 3) return null;
     const command = s8(this.rx[0]);
-
-    // Classic NRO framing is command + 2-byte size. The reference C# build is
-    // decompiled around this area, so for the handshake response we accept the
-    // standard big-endian interpretation and a little-endian fallback.
     const be = (this.rx[1] << 8) | this.rx[2];
     const le = this.rx[1] | (this.rx[2] << 8);
     let len = be;
     if (3 + len > this.rx.length && 3 + le <= this.rx.length) len = le;
     if (len < 0 || len > 8 * 1024 * 1024) throw new Error(`Invalid plain packet length ${len}`);
     if (this.rx.length < 3 + len) return null;
-
     const payload = this.rx.slice(3, 3 + len);
     this.rx = this.rx.slice(3 + len);
     return { command, payload };
@@ -111,16 +138,14 @@ export class NroProtocol {
 
   _tryEncryptedPacket() {
     if (this.rx.length < 3) return null;
-
-    // Parsing must not advance read-key state until a whole frame is available.
     const startR = this.curR;
     const dec = (raw) => this._readKeyByte(raw, "r");
 
     try {
       const command = s8(dec(this.rx[0]));
+      // Commands that use 3 encrypted length bytes in the original client reader.
       const longLenCommands = new Set([-32, -66, 11, -67, -74, -87, 66]);
       let headerLen, len;
-
       if (longLenCommands.has(command)) {
         if (this.rx.length < 4) { this.curR = startR; return null; }
         const n0 = s8(dec(this.rx[1])) + 128;
@@ -134,13 +159,8 @@ export class NroProtocol {
         len = (hi << 8) | lo;
         headerLen = 3;
       }
-
       if (len < 0 || len > 8 * 1024 * 1024) throw new Error(`Invalid encrypted packet length ${len}`);
-      if (this.rx.length < headerLen + len) {
-        this.curR = startR;
-        return null;
-      }
-
+      if (this.rx.length < headerLen + len) { this.curR = startR; return null; }
       const payload = new Uint8Array(len);
       for (let i = 0; i < len; i++) payload[i] = dec(this.rx[headerLen + i]);
       this.rx = this.rx.slice(headerLen + len);
@@ -154,9 +174,7 @@ export class NroProtocol {
   _acceptKey(payload) {
     if (!payload.length) throw new Error("Handshake response has no key payload");
     const keyLen = payload[0];
-    if (keyLen <= 0 || 1 + keyLen > payload.length) {
-      throw new Error(`Invalid key length ${keyLen}`);
-    }
+    if (keyLen <= 0 || 1 + keyLen > payload.length) throw new Error(`Invalid key length ${keyLen}`);
     const key = payload.slice(1, 1 + keyLen);
     for (let i = 0; i < key.length - 1; i++) key[i + 1] ^= key[i];
     this.key = key;
@@ -172,9 +190,7 @@ export class NroProtocol {
       ip2 = new TextDecoder().decode(payload.slice(p, p + strLen)); p += strLen;
       port2 = ((payload[p] << 24) | (payload[p + 1] << 16) | (payload[p + 2] << 8) | payload[p + 3]) >>> 0; p += 4;
       connect2 = payload[p] !== 0;
-    } catch (_) {
-      // Secondary endpoint is optional for the MVP.
-    }
+    } catch (_) {}
 
     this.onLog(`Handshake OK; key=${keyLen} bytes`);
     this.onKey({ keyLength: keyLen, ip2, port2, connect2 });
@@ -183,8 +199,7 @@ export class NroProtocol {
   frame(command, payload = new Uint8Array(0)) {
     if (!this.keyReady) throw new Error("Handshake key not ready");
     if (!(payload instanceof Uint8Array)) payload = new Uint8Array(payload);
-    if (payload.length > 0xffff) throw new Error("MVP sender only supports normal <=65535-byte packets");
-
+    if (payload.length > 0xffff) throw new Error("Sender supports <=65535-byte payloads");
     const out = new Uint8Array(3 + payload.length);
     out[0] = this._readKeyByte(u8(command), "w");
     out[1] = this._readKeyByte((payload.length >> 8) & 0xff, "w");
@@ -195,15 +210,7 @@ export class NroProtocol {
 
   makeSetClientType({ width = 1024, height = 600, version = VT15.version } = {}) {
     const w = new ByteWriter();
-    w.byte(2)                  // messageNotLogin subcommand: set client type
-      .byte(4)                 // PC client
-      .byte(1)                 // zoom level
-      .bool(false)
-      .int(width)
-      .int(height)
-      .bool(true)              // qwerty
-      .bool(true)              // supplied PC Unity client sets isTouch=true
-      .utf(`Pc platform xxx|${version}`);
+    w.byte(2).byte(4).byte(1).bool(false).int(width).int(height).bool(true).bool(true).utf(`Pc platform xxx|${version}`);
     return this.frame(-29, w.finish());
   }
 
@@ -212,14 +219,51 @@ export class NroProtocol {
     const pass = String(password || "");
     if (!user) throw new Error("Thiếu tài khoản");
     if (!pass) throw new Error("Thiếu mật khẩu");
-
     const w = new ByteWriter();
-    w.byte(0)                  // messageNotLogin subcommand: login
-      .utf(user)
-      .utf(pass)
-      .utf(version)
-      .byte(type);
+    w.byte(0).utf(user).utf(pass).utf(version).byte(type);
     return this.frame(-29, w.finish());
+  }
+
+  // -28 = messageNotMap. Subcommand 13 is the original client's clientOk().
+  makeClientOk() {
+    return this.frame(-28, new Uint8Array([13]));
+  }
+
+  makeSelectCharacter(name) {
+    const w = new ByteWriter();
+    w.byte(1).utf(String(name)); // messageNotMap subcommand 1
+    return this.frame(-28, w.finish());
+  }
+
+  parseServerVersions(payload) {
+    const r = new ByteReader(payload);
+    const sub = r.byte();
+    if (sub !== 4) throw new Error(`Expected -28/4, got sub=${sub}`);
+    return {
+      data: r.byte(),
+      map: r.byte(),
+      skill: r.byte(),
+      item: r.byte(),
+      extra: r.byte(),
+    };
+  }
+
+  parseLoginCharacters(payload) {
+    const r = new ByteReader(payload);
+    const count = r.byte();
+    if (count > 20) throw new Error(`Unreasonable character count ${count}`);
+    const characters = [];
+    for (let i = 0; i < count; i++) {
+      characters.push({
+        playerId: r.int(),
+        name: r.utf(),
+        head: r.short(),
+        body: r.short(),
+        leg: r.short(),
+        power: r.long(),
+      });
+    }
+    return characters;
   }
 }
 

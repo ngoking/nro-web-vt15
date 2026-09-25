@@ -16,6 +16,7 @@
     #status{display:inline-block;padding:6px 10px;border-radius:999px;background:#2a3948;font-size:13px}#status[data-state="ok"]{background:#184c32}#status[data-state="busy"]{background:#5a4814}#status[data-state="err"]{background:#5a2020}
     #log{height:300px;overflow:auto;background:#090d12;border-radius:10px;padding:12px;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
     #log .ok{color:#8ee6ad}#log .err{color:#ff9696}.warning{border-left:3px solid #e6bd63;padding-left:12px}
+    .char-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.char-card{border:1px solid #334659;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}.char-card span{font-size:12px;color:#aebdca}.char-card button{white-space:nowrap}
     @media(max-width:640px){body{padding:12px}.row{grid-template-columns:1fr}}
   </style>
 </head>
@@ -39,6 +40,8 @@
     </div>
     <p class="warning">Prototype này kiểm tra kết nối + handshake + login protocol. Nó chưa render map/nhân vật nên chưa phải bản chơi hoàn chỉnh.</p>
   </section>
+
+  <section id="characters" class="card" hidden></section>
 
   <section class="card">
     <p><strong>Protocol log</strong> — không ghi mật khẩu.</p>
