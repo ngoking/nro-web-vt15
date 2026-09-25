@@ -146,20 +146,23 @@ function disconnect() {
 connectBtn.addEventListener('click', () => {
   disconnect();
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${scheme}://${location.host}/ws`);
-  ws.binaryType = 'arraybuffer';
+  const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+  ws = socket;
+  socket.binaryType = 'arraybuffer';
   connectBtn.disabled = true;
   disconnectBtn.disabled = false;
   setStatus(`Đang nối ${VT15.host}:${VT15.port}…`, 'busy');
   log(`Mở gateway tới ${VT15.name}: ${VT15.host}:${VT15.port}`);
 
-  ws.addEventListener('open', () => {
+  socket.addEventListener('open', () => {
+    if (ws !== socket) return;
     setStatus('TCP đã mở — đang handshake…', 'busy');
     log('WebSocket gateway OK; gửi handshake -27.');
-    ws.send(protocol.handshakeRequest());
+    socket.send(protocol.handshakeRequest());
   });
 
-  ws.addEventListener('message', (ev) => {
+  socket.addEventListener('message', (ev) => {
+    if (ws !== socket) return;
     if (typeof ev.data === 'string') {
       log(ev.data, 'err');
       return;
@@ -172,12 +175,14 @@ connectBtn.addEventListener('click', () => {
     }
   });
 
-  ws.addEventListener('close', (ev) => {
+  socket.addEventListener('close', (ev) => {
+    if (ws !== socket) return;
     log(`Kết nối đóng: code=${ev.code}${ev.reason ? ` ${ev.reason}` : ''}`);
-    if (ws) disconnect();
+    disconnect();
   });
 
-  ws.addEventListener('error', () => {
+  socket.addEventListener('error', () => {
+    if (ws !== socket) return;
     log('WebSocket/gateway error.', 'err');
     setStatus('Không kết nối được gateway/server', 'err');
   });

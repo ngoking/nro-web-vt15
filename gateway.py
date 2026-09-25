@@ -24,7 +24,18 @@ log = logging.getLogger("nro-vt15-gateway")
 
 
 async def index(_request: web.Request) -> web.FileResponse:
-    return web.FileResponse(WEB_DIR / "index.html")
+    response = web.FileResponse(WEB_DIR / "index.html")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+async def static_no_cache(request: web.Request) -> web.FileResponse:
+    name = request.match_info["name"]
+    if name not in {"app.js", "protocol.js"}:
+        raise web.HTTPNotFound()
+    response = web.FileResponse(WEB_DIR / name)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 async def tcp_to_ws(reader: asyncio.StreamReader, ws: web.WebSocketResponse) -> None:
@@ -102,7 +113,7 @@ def build_app() -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/ws", websocket_proxy)
     app.router.add_get("/health", health)
-    app.router.add_static("/static/", WEB_DIR, show_index=False)
+    app.router.add_get("/static/{name}", static_no_cache)
     return app
 
 
